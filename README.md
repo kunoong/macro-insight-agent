@@ -1,112 +1,48 @@
-# 📊 Macro Insight AI Agent (v2.0: VARX-IRF Engine)
- 
-**Advanced Macroeconomic Analysis with Exogenous Control & Impulse Response Analysis**
- 
-> Operationalizing econometric theory (VARX-IRF) into a production-ready AI Agent system.
- 
+# 📊 Macro Insight AI Agent (v3.0: SARIMAX-ADF Engine)
+
+**Advanced Macroeconomic Analysis with Automated Stationarity & Lag Optimization**
+
+> Operationalizing econometric theory (SARIMAX) into a robust, production-ready AI Agent system for emerging market analysis.
+
 🔗 **Live Demo**: [macro-insight-agent-36u7rxpwgjksqvqbdzzugu.streamlit.app](https://macro-insight-agent-36u7rxpwgjksqvqbdzzugu.streamlit.app)
- 
+
 ---
- 
+
 ## 📌 Overview
- 
-This project bridges theoretical econometrics and modern Agentic AI. It implements a **VARX (Vector Autoregression with Exogenous Variables)** model to analyze the dynamic relationship between interest rates and energy costs, controlled by currency fluctuations — directly extending the methodology from my undergraduate thesis on Korean used-car export markets.
- 
+
+This project bridges theoretical econometrics and modern Agentic AI. It implements an **ARX (Autoregressive model with Exogenous variables)** framework using **SARIMAX**, specifically tuned to analyze how global macroeconomic shocks propagate into the Cambodian used-car export market.
+
 ---
- 
+
 ## 🚀 Key Technical Features
- 
+
 | Feature | Detail |
 |---------|--------|
-| **VARX Modeling** | Incorporates Exchange Rate (USD/KRW) as exogenous variable to isolate pure interest rate shocks |
-| **Impulse Response Function** | Tracks how a 1-unit FedRate shock propagates over a 10-month horizon |
-| **Granger Causality Test** | Statistically validates leading indicators (FedRate → WTI, p-value = 0.0833) |
+| **Automated Stationarity** | Implements dynamic ADF-test based differencing (d=0, 1, 2) to ensure robust modeling |
+| **Optimal Lag Selection** | Automatically explores AR order (p=1 to 4) based on AIC to maximize predictive power |
+| **SARIMAX Engine** | Single-equation estimation (PC1) with exogenous controls (FedRate, WTI, DXY, SCFI) |
 | **Agentic Workflow** | LangGraph orchestrates data acquisition, statistical estimation, and visualization |
-| **Automated Reporting** | PDF report generation via FPDF |
-| **Live Data** | Real-time macroeconomic indicators via FRED API (FedRate, WTI, USD/KRW) |
- 
+| **Local Data Pipeline** | Seamless integration with local Excel datasets (data.xlsx, PC_Scores.xlsx) |
+
 ---
- 
+
 ## 📈 Statistical Framework
- 
-$$\mathbf{y}_t = \mathbf{c} + \sum_{i=1}^p \mathbf{A}_i \mathbf{y}_{t-i} + \mathbf{B} \mathbf{x}_t + \mathbf{\epsilon}_t$$
- 
-Where $\mathbf{y}_t = [\text{FedRate}_t, \text{WTI}_t]'$ and $\mathbf{x}_t = [\text{USD/KRW}_t]'$
- 
+
+$$\text{PC1}_t = c + \sum_{k=1}^p \phi_k \text{PC1}_{t-k} + \gamma' \mathbf{X}_t + \epsilon_t$$
+
+Where $\mathbf{X}_t = [\text{FedRate}_t, \text{WTI}_t, \text{DXY}_t, \text{SCFI}_t]'$
+
 ---
- 
+
 ## 📊 Analysis Results
- 
+
 | Metric | Result |
 |--------|--------|
-| Granger Causality (FedRate → WTI) | p-value = **0.0833** |
-| Control Variable | USD/KRW Exchange Rate |
-| IRF Horizon | 10 months |
-| Data Source | FRED API (real-time) |
- 
-![Analysis Result](./macro_trend_final.png)
- 
+| Target Market | Cambodia (PC1: Used-car Demand Index) |
+| Model | SARIMAX (p=3, 0, 0) |
+| Key Finding (FedRate → PC1) | $\gamma$ = -0.1533 (p < 0.05) |
+| Data Source | Local Macro Indicators (Excel) |
+
 ---
- 
+
 ## 🏗️ System Architecture
- 
-```
-User Input
-    ↓
-LangGraph Agent (Orchestrator)
-    ↓
-┌─────────────────────────────────┐
-│  Node 1: FRED API Data Fetch    │
-│  Node 2: VARX Model Estimation  │
-│  Node 3: Granger Causality Test │
-│  Node 4: IRF Visualization      │
-│  Node 5: PDF Report Generation  │
-└─────────────────────────────────┘
-    ↓
-Streamlit Dashboard Output
-```
- 
----
- 
-## 📂 Project Structure
- 
-```
-macro-insight-agent/
-├── agent.py          # LangGraph agent workflow
-├── app.py            # Streamlit UI
-├── main.py           # Core VARX-IRF engine
-├── requirements.txt
-├── .gitignore        # .env security management
-└── README.md
-```
- 
----
- 
-## 🛠️ Tech Stack
- 
-| Category | Technology |
-|----------|-----------|
-| Agent Framework | LangGraph |
-| Econometrics | statsmodels (VAR, VARX, Granger) |
-| Data Pipeline | FRED API |
-| Visualization | Matplotlib |
-| UI | Streamlit |
-| Reporting | FPDF |
-| Language | Python 3.14 |
- 
----
- 
-## 🔧 Troubleshooting & Engineering Notes
- 
-- **FPDF Unicode Error**: Resolved by adopting full English output strategy, ensuring cross-platform compatibility
-- **statsmodels API Versioning**: Debugged `exog` parameter declaration differences across versions to complete VARX implementation
-- **Git Rebase**: Managed remote repository synchronization and `.env` security file exclusion
----
- 
-## 🎓 About
- 
-Senior at **Hankuk University of Foreign Studies**, double majoring in Statistics and Computer Science. This project operationalizes the VARX-IRF methodology from my undergraduate thesis on macroeconomic shocks in Korean used-car export markets into a functional AI agent system.
- 
----
- 
-*Last updated: April 2026*
