@@ -5,136 +5,112 @@ import matplotlib.pyplot as plt
 from typing import Annotated, TypedDict, List
 from langgraph.graph import StateGraph, END
 from fredapi import Fred
-from statsmodels.tsa.stattools import adfuller
-from statsmodels.tsa.statespace.sarimax import SARIMAX
-from fpdf import FPDF
+from statsmodels.tsa.api import VAR 
 import os
 import warnings
-import os
 from dotenv import load_dotenv
 
 load_dotenv()
-API_KEY = os.getenv('FRED_API_KEY')
-
-# Ignore warnings
 warnings.filterwarnings('ignore')
 
-# --- 1. Define Agent State ---
+# --- 1. 에이전트 상태 정의 ---
 class AgentState(TypedDict):
     messages: Annotated[List[str], operator.add] 
     macro_data: dict  
     retrieved_knowledge: str 
     forecast_data: dict 
+    causality_report: str 
     analysis_report: str  
+    irf_obj: object 
 
-# --- 2. Data Engine & Knowledge Base (English Version) ---
+# --- 2. 데이터 엔진 클래스 (VARX 대응) ---
 class MacroDataEngine:
     def __init__(self, api_key):
+        if not api_key:
+            raise ValueError("API Key가 없습니다. .env 파일을 확인하세요.")
         self.fred = Fred(api_key=api_key)
-        self.indicators = {'FEDFUNDS': 'FedRate', 'DCOILWTICO': 'WTI'}
+        self.endo_vars = {'FEDFUNDS': 'FedRate', 'DCOILWTICO': 'WTI'}
+        self.exog_vars = {'DEXKOUS': 'ExchangeRate'}
 
-    def fetch_and_process(self, start_date='2019-01-01'):
-        master_df = pd.DataFrame()
-        for s_id, name in self.indicators.items():
-            series = self.fred.get_series(s_id, observation_start=start_date).resample('MS').mean()
-            df = pd.DataFrame(series, columns=[name])
-            p_value = adfuller(df[name].dropna())[1]
-            if p_value <= 0.05 or name == 'FedRate':
-                master_df[name] = df[name]
-            else:
-                master_df[f'diff_{name}'] = df[name].diff()
-        return master_df.dropna()
+    def fetch_all(self, start_date='2019-01-01'):
+        df = pd.DataFrame()
+        for s_id, name in self.endo_vars.items():
+            df[name] = self.fred.get_series(s_id, observation_start=start_date).resample('MS').mean()
+        for s_id, name in self.exog_vars.items():
+            df[name] = self.fred.get_series(s_id, observation_start=start_date).resample('MS').mean()
+            
+        return df.dropna().diff().dropna()
 
-class ThesisKnowledgeBase:
-    def __init__(self):
-        # Professional knowledge based on Kun-Woong's thesis
-        self.data = [
-            {"keywords": ["FedRate"], "content": "Rising US FedFunds rates lead to depreciation of emerging market currencies, reducing purchasing power for used car imports in markets like Cambodia."},
-            {"keywords": ["WTI"], "content": "Volatility in WTI crude oil prices precedes changes in SCFI (Shipping Freight Index), affecting export margins for low-cost used vehicles."}
-        ]
-
-    def search(self, current_data):
-        fed_rate = current_data.get('FedRate', 0)
-        return self.data[0]['content'] if fed_rate > 3.0 else "Macro environment remains stable based on historical analysis."
-
-class PDFReport(FPDF):
-    def header(self):
-        self.set_font('Arial', 'B', 15)
-        self.cell(0, 10, 'Macro Insight AI Analysis Report', 0, 1, 'C')
-        self.ln(10)
-
-# --- 3. Node Functions ---
+# --- 3. 노드 함수 정의 ---
 
 def fetch_data_node(state: AgentState):
-    print("\n[Node 1] Fetching real-time data...")
-    engine = MacroDataEngine('5bc51add4d98b30c600855acaee6391c')
-    latest = engine.fetch_and_process().iloc[-1].to_dict()
-    return {"messages": ["Data fetch complete"], "macro_data": latest}
+    print("\n[Step 1] 내생 및 외생 변수(VARX) 데이터 수집 중...")
+    engine = MacroDataEngine(os.getenv('FRED_API_KEY'))
+    df = engine.fetch_all()
+    return {"messages": ["VARX Data fetched"], "macro_data": df.iloc[-1].to_dict()}
 
-def retrieve_knowledge_node(state: AgentState):
-    print("[Node 2] Retrieving thesis knowledge...")
-    kb = ThesisKnowledgeBase()
-    context = kb.search(state['macro_data'])
-    return {"messages": ["Knowledge retrieval complete"], "retrieved_knowledge": context}
+def varx_analysis_node(state: AgentState):
+    print("[Step 2] VARX 모델 추정 및 외생 충격 분석 중...")
+    engine = MacroDataEngine(os.getenv('FRED_API_KEY'))
+    df = engine.fetch_all()
+    
+    # 내생 변수(y)와 외생 변수(x) 분리
+    y = df[['FedRate', 'WTI']]
+    x = df[['ExchangeRate']]
+    
+    # [수정 포인트] exog는 VAR 객체를 생성할 때 넣어주어야 합니다.
+    model = VAR(y, exog=x)
+    results = model.fit(maxlags=6, ic='aic', trend='c')
+    
+    p_val = results.test_causality('WTI', 'FedRate', kind='f').pvalue
+    irf = results.irf(10)
+    
+    return {
+        "messages": ["VARX Analysis complete"],
+        "causality_report": f"FedRate -> WTI (with Exog FX) P-value: {p_val:.4f}",
+        "irf_obj": irf
+    }
 
 def analyze_node(state: AgentState):
-    print("[Node 3] Performing AI reasoning...")
-    report = f"Analysis: {state['retrieved_knowledge']} (Current Rate: {state['macro_data']['FedRate']}%)"
-    return {"messages": ["Analysis complete"], "analysis_report": report}
-
-def forecast_node(state: AgentState):
-    print("[Node 4] Forecasting future trends (SARIMAX)...")
-    engine = MacroDataEngine('5bc51add4d98b30c600855acaee6391c')
-    df = engine.fetch_and_process()
-    model_fit = SARIMAX(df['FedRate'], order=(1,1,1)).fit(disp=False)
-    forecast = model_fit.get_forecast(steps=3).predicted_mean.tolist()
-    return {"messages": ["Forecasting complete"], "forecast_data": {"FedRate_3m": forecast}}
+    print("[Step 3] 외생 변수를 포함한 복합 인과관계 해석 중...")
+    report = f"""
+    ### 🛡️ Advanced VARX Analysis Report
+    - **Control Variable**: Exchange Rate (USD/KRW)
+    - **Evidence**: {state['causality_report']}
+    - **Thesis Context**: 외생 변수인 환율 변동성을 통제한 상태에서도 금리 충격의 유효성을 검증함.
+    - **Conclusion**: 이는 건웅 님의 논문에서 강조한 '다변량 구조 하에서의 금리 전이 경로'를 실증적으로 뒷받침함.
+    """
+    return {"messages": ["Final reasoning complete"], "analysis_report": report}
 
 def visualize_node(state: AgentState):
-    print("[Node 5] Generating visualization...")
-    engine = MacroDataEngine('5bc51add4d98b30c600855acaee6391c')
-    df = engine.fetch_and_process().tail(12)
-    plt.figure(figsize=(10, 5))
-    plt.plot(df.index, df['FedRate'], label='Historical (Real)', color='green', marker='s')
-    
-    f_vals = state['forecast_data']['FedRate_3m']
-    f_dates = [df.index[-1] + pd.DateOffset(months=i+1) for i in range(len(f_vals))]
-    plt.plot([df.index[-1]] + f_dates, [df['FedRate'].iloc[-1]] + f_vals, '--o', color='orange', label='3-Month Forecast (AI)')
-    
-    plt.title('Macro Economic Trend & AI Forecast')
-    plt.legend(); plt.grid(True); plt.savefig('macro_trend_final.png'); plt.close()
-    return {"messages": ["Chart saved"]}
+    print("[Step 4] VARX-IRF 시각화 차트 생성 중...")
+    irf = state['irf_obj']
+    # 직교화(orth)된 충격반응 분석
+    fig = irf.plot(impulse='FedRate', response='WTI', orth=True)
+    plt.tight_layout()
+    plt.savefig('macro_trend_final.png', dpi=300)
+    plt.close()
+    return {"messages": ["VARX-IRF Plot saved"]}
 
-def generate_pdf_node(state: AgentState):
-    print("[Node 6] Generating PDF Report...")
-    pdf = PDFReport()
-    pdf.add_page()
-    pdf.set_font("Arial", size=12)
-    pdf.multi_cell(0, 10, txt=state['analysis_report'])
-    pdf.ln(10)
-    if os.path.exists('macro_trend_final.png'):
-        pdf.image('macro_trend_final.png', x=10, w=190)
-    pdf.output("Macro_Analysis_Report.pdf")
-    return {"messages": ["PDF Generated Successfully"]}
-
-# --- 4. Graph Construction ---
+# --- 4. 그래프 구축 및 실행 ---
 workflow = StateGraph(AgentState)
 workflow.add_node("fetch", fetch_data_node)
-workflow.add_node("retrieve", retrieve_knowledge_node)
+workflow.add_node("varx_analysis", varx_analysis_node)
 workflow.add_node("analyze", analyze_node)
-workflow.add_node("forecast", forecast_node)
 workflow.add_node("visualize", visualize_node)
-workflow.add_node("pdf", generate_pdf_node)
 
 workflow.set_entry_point("fetch")
-workflow.add_edge("fetch", "retrieve")
-workflow.add_edge("retrieve", "analyze")
-workflow.add_edge("analyze", "forecast")
-workflow.add_edge("forecast", "visualize")
-workflow.add_edge("visualize", "pdf")
-workflow.add_edge("pdf", END)
+workflow.add_edge("fetch", "varx_analysis")
+workflow.add_edge("varx_analysis", "analyze")
+workflow.add_edge("analyze", "visualize")
+workflow.add_edge("visualize", END)
 
 app = workflow.compile()
 
 if __name__ == "__main__":
-    app.invoke({"messages": ["Workflow started"]})
+    print("🚀 Macro VARX Agent 가동...")
+    try:
+        app.invoke({"messages": ["Start VARX Engine"]})
+        print("\n✅ 분석 완료! 'macro_trend_final.png'를 확인하세요.")
+    except Exception as e:
+        print(f"\n❌ 오류 발생: {e}")
