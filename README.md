@@ -1,25 +1,18 @@
-# 📊 Macro Insight AI Agent
-**Automated Macroeconomic Analysis with SARIMAX Forecasting & Thesis-based RAG**
+# 📊 Macro Insight AI Agent (v2.0: VARX-IRF Engine)
+**Advanced Macroeconomic Analysis with Exogenous Control & Impulse Response Analysis**
 
-This project is an advanced AI Agent system that automates the pipeline from live macroeconomic data fetching to professional reporting. It bridges the gap between theoretical econometrics and modern Agentic AI workflows.
+This project is an advanced AI Agent system that bridges theoretical econometrics and modern Agentic AI. It implements a **VARX (Vector Autoregression with Exogenous variables)** model to analyze the dynamic interaction between interest rates and energy costs, controlled by currency fluctuations.
 
-## 🚀 Key Features
-- **Real-time Data Pipeline**: Integrates with the **FRED API** to fetch live FedFunds Rate and WTI Crude Oil data.
-- **Statistical Forecasting**: Implements a **SARIMAX** model to predict 3-month future trends, showcasing rigorous statistical analysis.
-- **Thesis-based RAG**: Leverages a Knowledge Base derived from my undergraduate thesis, *"Analysis of Used Car Export Dynamics in Emerging Markets."*
-- **Agentic Workflow**: Orchestrated using **LangGraph**, managing complex states from data processing to automated reasoning.
-- **Automated Reporting**: Generates professional-grade **PDF Analysis Reports** and provides a web-based dashboard via **Streamlit**.
+## 🚀 Key Technical Evolution
+- **VARX Modeling**: Moves beyond simple forecasting by incorporating **Exchange Rate (USD/KRW)** as an exogenous variable ($\mathbf{x}_t$) to isolate pure interest rate shocks.
+- **Impulse Response Function (IRF)**: Analyzes how a 1-unit shock in the FedFunds Rate propagates through the system over a 10-month horizon.
+- **Granger Causality Test**: Statistically validates the leading indicators for emerging market export margins, as discussed in my undergraduate thesis.
+- **Agentic Workflow**: Managed by **LangGraph**, orchestrating data acquisition, statistical estimation, and automated visualization.
 
-## 🛠 Tech Stack
-- **AI/LLM**: LangGraph, OpenAI (Optional)
-- **Data/Stats**: Pandas, Statsmodels (SARIMAX, ADF Test), Matplotlib
-- **Web/UI**: Streamlit
-- **API**: FRED (Federal Reserve Economic Data)
+## 📈 Statistical Framework
+The system estimates the following multivariate structure:
+$$\mathbf{y}_t = \mathbf{c} + \sum_{i=1}^p \mathbf{A}_i \mathbf{y}_{t-i} + \mathbf{B} \mathbf{x}_t + \mathbf{\epsilon}_t$$
+Where $\mathbf{y}_t = [\text{FedRate}_t, \text{WTI}_t]'$ and $\mathbf{x}_t = [\text{ExchangeRate}_t]'$
 
-## 🎓 Academic & Professional Context
-I am a senior at **Hankuk University of Foreign Studies**, double majoring in **Statistics and Computer Science**. This project was developed to demonstrate how statistical domain knowledge can be operationalized through AI agents to provide actionable economic insights. 
-
-## 🏁 Installation & Usage
-1. Clone the repository:
-   ```bash
-   git clone [https://github.com/kunoong/macro-insight-agent.git](https://github.com/kunoong/macro-insight-agent.git)
+## 🎓 About the Author
+I am a senior at **Hankuk University of Foreign Studies**, double majoring in **Statistics and Computer Science**. This project demonstrates my ability to operationalize complex statistical theories into functional AI services, a core skill I aim to bring to the **SCAI Lab**.
