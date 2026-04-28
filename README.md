@@ -16,3 +16,4 @@ Where $\mathbf{y}_t = [\text{FedRate}_t, \text{WTI}_t]'$ and $\mathbf{x}_t = [\t
 
 ## 🎓 About the Author
 I am a senior at **Hankuk University of Foreign Studies**, double majoring in **Statistics and Computer Science**. This project demonstrates my ability to operationalize complex statistical theories into functional AI services, a core skill I aim to bring to the **SCAI Lab**.
+![Analysis Result](./macro_trend_final.png)
