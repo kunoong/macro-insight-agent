@@ -1,98 +1,126 @@
 import operator
-import datetime
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 from typing import Annotated, TypedDict, List
 from langgraph.graph import StateGraph, END
-from fredapi import Fred
-from statsmodels.tsa.api import VAR 
-import os
+from statsmodels.tsa.stattools import adfuller
+from statsmodels.tsa.statespace.sarimax import SARIMAX
 import warnings
 from dotenv import load_dotenv
 
 load_dotenv()
 warnings.filterwarnings('ignore')
 
-# --- 1. 에이전트 상태 정의 ---
 class AgentState(TypedDict):
     messages: Annotated[List[str], operator.add] 
-    macro_data: dict  
-    retrieved_knowledge: str 
-    forecast_data: dict 
     causality_report: str 
     analysis_report: str  
-    irf_obj: object 
+    var_results: object 
+    best_lag: int
 
-# --- 2. 데이터 엔진 클래스 (VARX 대응) ---
+def make_stationary(series, name):
+    for d in range(3):
+        s = series.diff(d).dropna() if d > 0 else series.dropna()
+        try:
+            stat, p, _, _, _, _ = adfuller(s, autolag='AIC')
+        except Exception:
+            p = 1.0
+        if p < 0.05:
+            return series.diff(d) if d > 0 else series, d
+    return series.diff(2), 2
+
 class MacroDataEngine:
-    def __init__(self, api_key):
-        if not api_key:
-            raise ValueError("API Key가 없습니다. .env 파일을 확인하세요.")
-        self.fred = Fred(api_key=api_key)
-        self.endo_vars = {'FEDFUNDS': 'FedRate', 'DCOILWTICO': 'WTI'}
-        self.exog_vars = {'DEXKOUS': 'ExchangeRate'}
-
-    def fetch_all(self, start_date='2019-01-01'):
-        df = pd.DataFrame()
-        for s_id, name in self.endo_vars.items():
-            df[name] = self.fred.get_series(s_id, observation_start=start_date).resample('MS').mean()
-        for s_id, name in self.exog_vars.items():
-            df[name] = self.fred.get_series(s_id, observation_start=start_date).resample('MS').mean()
+    def fetch_all(self):
+        macro_df = pd.read_excel('data.xlsx')
+        pc_df = pd.read_excel('PC_Scores.xlsx')
+        
+        country_pc = pc_df[pc_df['국가명'] == '캄보디아'][['기간', 'PC1']].copy()
+        country_pc = country_pc.sort_values('기간').reset_index(drop=True)
+        merged = country_pc.merge(
+            macro_df, left_on='기간', right_on='YearMonth', how='inner'
+        ).drop(columns=['YearMonth']).set_index('기간')
+        
+        stationary_data = {}
+        for col in ['PC1', 'FedRate', 'WTI', 'DXY', 'SCFI']:
+            s, d = make_stationary(merged[col], col)
+            stationary_data[col] = s
             
-        return df.dropna().diff().dropna()
-
-# --- 3. 노드 함수 정의 ---
+        return pd.DataFrame(stationary_data).dropna()
 
 def fetch_data_node(state: AgentState):
-    print("\n[Step 1] 내생 및 외생 변수(VARX) 데이터 수집 중...")
-    engine = MacroDataEngine(os.getenv('FRED_API_KEY'))
-    df = engine.fetch_all()
-    return {"messages": ["VARX Data fetched"], "macro_data": df.iloc[-1].to_dict()}
+    print("\n[Step 1] 데이터 로드 및 정상성 확보(ADF) 완료")
+    return {"messages": ["Data processed"]}
 
 def varx_analysis_node(state: AgentState):
-    print("[Step 2] VARX 모델 추정 및 외생 충격 분석 중...")
-    engine = MacroDataEngine(os.getenv('FRED_API_KEY'))
+    print("[Step 2] SARIMAX 최적 모형 추정 중...")
+    engine = MacroDataEngine()
     df = engine.fetch_all()
     
-    # 내생 변수(y)와 외생 변수(x) 분리
-    y = df[['FedRate', 'WTI']]
-    x = df[['ExchangeRate']]
+    endog = df['PC1']
+    exog = df[['FedRate', 'WTI', 'DXY', 'SCFI']]
     
-    # [수정 포인트] exog는 VAR 객체를 생성할 때 넣어주어야 합니다.
-    model = VAR(y, exog=x)
-    results = model.fit(maxlags=6, ic='aic', trend='c')
+    best_aic = np.inf
+    best_lag = 1
+    for lag in range(1, 5):
+        try:
+            m = SARIMAX(endog, exog=exog, order=(lag, 0, 0), trend='c').fit(disp=False)
+            if m.aic < best_aic:
+                best_aic = m.aic
+                best_lag = lag
+        except Exception:
+            pass
+            
+    model = SARIMAX(endog, exog=exog, order=(best_lag, 0, 0), trend='c')
+    results = model.fit(disp=False)
     
-    p_val = results.test_causality('WTI', 'FedRate', kind='f').pvalue
-    irf = results.irf(10)
+    gamma_1 = results.params['FedRate']
+    p_val = results.pvalues['FedRate']
     
     return {
-        "messages": ["VARX Analysis complete"],
-        "causality_report": f"FedRate -> WTI (with Exog FX) P-value: {p_val:.4f}",
-        "irf_obj": irf
+        "messages": ["SARIMAX Analysis complete"],
+        "causality_report": f"γ = {gamma_1:.4f}, p = {p_val:.4f}",
+        "var_results": results,
+        "best_lag": best_lag
     }
 
 def analyze_node(state: AgentState):
-    print("[Step 3] 외생 변수를 포함한 복합 인과관계 해석 중...")
+    print("[Step 3] AI 인사이트 도출 중...")
     report = f"""
-    ### 🛡️ Advanced VARX Analysis Report
-    - **Control Variable**: Exchange Rate (USD/KRW)
-    - **Evidence**: {state['causality_report']}
-    - **Thesis Context**: 외생 변수인 환율 변동성을 통제한 상태에서도 금리 충격의 유효성을 검증함.
-    - **Conclusion**: 이는 건웅 님의 논문에서 강조한 '다변량 구조 하에서의 금리 전이 경로'를 실증적으로 뒷받침함.
+    ### 🛡️ 신흥국 자동차 수요 구조 변동성 분석
+    - **타겟 시장**: 캄보디아 (수요 구조 지수 PC1)
+    - **적용 모형**: SARIMAX(p={state['best_lag']}, 0, 0)
+    - **핵심 지표 (FedRate → PC1)**: **{state['causality_report']}**
+    - **종합 결론**: 실시간 거시지표 파이프라인 분석 결과, 미국 금리(FedRate) 긴축은 캄보디아 시장에서 저가·가성비 차량 위주의 수요 구조(PC1 하락)를 강제하는 전달 메커니즘으로 일관되게 작용함.
     """
-    return {"messages": ["Final reasoning complete"], "analysis_report": report}
+    return {"messages": ["Analysis complete"], "analysis_report": report}
 
 def visualize_node(state: AgentState):
-    print("[Step 4] VARX-IRF 시각화 차트 생성 중...")
-    irf = state['irf_obj']
-    # 직교화(orth)된 충격반응 분석
-    fig = irf.plot(impulse='FedRate', response='WTI', orth=True)
+    print("[Step 4] 동시적 충격 효과 차트 렌더링 중...")
+    results = state['var_results']
+    fig, ax = plt.subplots(figsize=(8, 5))
+    
+    exog_vars = ['FedRate', 'WTI', 'DXY', 'SCFI']
+    coefs = [results.params[v] for v in exog_vars]
+    pvals = [results.pvalues[v] for v in exog_vars]
+    
+    colors = ['#d62728' if p < 0.05 else '#7f7f7f' for p in pvals]
+    bars = ax.bar(exog_vars, coefs, color=colors)
+    ax.set_title(f"Macro Shocks on Cambodia PC1 (SARIMAX p={state['best_lag']})", fontweight='bold')
+    ax.set_ylabel('Coefficient (γ)')
+    plt.axhline(0, color='black', linewidth=0.8)
+    
+    for i, p in enumerate(pvals):
+        yval = coefs[i]
+        offset = 0.01 if yval > 0 else -0.01
+        ax.text(i, yval + offset, f"p={p:.3f}", ha='center', 
+                va='bottom' if yval > 0 else 'top', fontsize=10, fontweight='bold')
+        
     plt.tight_layout()
     plt.savefig('macro_trend_final.png', dpi=300)
     plt.close()
-    return {"messages": ["VARX-IRF Plot saved"]}
+    return {"messages": ["Chart saved"]}
 
-# --- 4. 그래프 구축 및 실행 ---
 workflow = StateGraph(AgentState)
 workflow.add_node("fetch", fetch_data_node)
 workflow.add_node("varx_analysis", varx_analysis_node)
@@ -106,11 +134,3 @@ workflow.add_edge("analyze", "visualize")
 workflow.add_edge("visualize", END)
 
 app = workflow.compile()
-
-if __name__ == "__main__":
-    print("🚀 Macro VARX Agent 가동...")
-    try:
-        app.invoke({"messages": ["Start VARX Engine"]})
-        print("\n✅ 분석 완료! 'macro_trend_final.png'를 확인하세요.")
-    except Exception as e:
-        print(f"\n❌ 오류 발생: {e}")

@@ -1,82 +1,82 @@
 import pandas as pd
-from fredapi import Fred
+import numpy as np
 from statsmodels.tsa.stattools import adfuller
+from statsmodels.tsa.statespace.sarimax import SARIMAX
 import warnings
 
-# 경고 메시지 무시 (ADF 검정 시 발생하는 불필요한 경고 방지)
+# 불필요한 경고 숨김
 warnings.filterwarnings('ignore')
 
+def make_stationary(series, name, verbose=False):
+    """ADF 검정을 통한 동적 차분(Differencing) 수행"""
+    for d in range(3):
+        s = series.diff(d).dropna() if d > 0 else series.dropna()
+        try:
+            stat, p, _, _, _, _ = adfuller(s, autolag='AIC')
+        except Exception:
+            p = 1.0
+        if p < 0.05:
+            return series.diff(d) if d > 0 else series, d
+    return series.diff(2), 2
+
 class MacroDataEngine:
-    def __init__(self, api_key):
-        """
-        데이터 수집 및 전처리를 담당하는 엔진 클래스
-        """
-        self.fred = Fred(api_key=api_key)
-        # 논문 분석 기반 핵심 외생변수 매핑 [cite: 250]
-        self.indicators = {
-            'FEDFUNDS': 'FedRate',   # 미국 기준금리
-            'DCOILWTICO': 'WTI',     # 국제유가
-            'DTWEXBGS': 'DXY'        # 달러 인덱스
-        }
+    def __init__(self):
+        self.macro_file = 'data.xlsx'
+        self.pc_file = 'PC_Scores.xlsx'
 
-    def fetch_and_process(self, start_date='2019-01-01'):
-        """
-        데이터 수집 -> 리샘플링 -> ADF 검정 -> 조건부 차분 수행
-        """
-        master_df = pd.DataFrame()
+    def fetch_and_process(self):
+        print(f"🚀 데이터 로드 시작: {self.macro_file}, {self.pc_file}")
+        macro_df = pd.read_excel(self.macro_file)
+        pc_df = pd.read_excel(self.pc_file)
         
-        print("🚀 거시경제 데이터 수집 및 분석 시작...")
-
-        for s_id, name in self.indicators.items():
-            # 1. 데이터 수집 [cite: 30, 48]
-            series = self.fred.get_series(s_id, observation_start=start_date)
+        # 캄보디아 PC1 필터링 및 병합
+        country_pc = pc_df[pc_df['국가명'] == '캄보디아'][['기간', 'PC1']].copy()
+        country_pc = country_pc.sort_values('기간').reset_index(drop=True)
+        merged = country_pc.merge(
+            macro_df, left_on='기간', right_on='YearMonth', how='inner'
+        ).drop(columns=['YearMonth']).set_index('기간')
+        
+        print("🔍 ADF 단위근 검정 및 자동 차분(Differencing) 적용 중...")
+        stationary_data = {}
+        for col in ['PC1', 'FedRate', 'WTI', 'DXY', 'SCFI']:
+            s, d = make_stationary(merged[col], col)
+            stationary_data[col] = s
             
-            # 2. 월간 리샘플링 (일일 데이터를 월간 평균으로 변환하여 주기 일치)
-            # 논문의 월별 패널 데이터 분석 방식을 준수합니다[cite: 166, 183].
-            series_monthly = series.resample('MS').mean()
-            df = pd.DataFrame(series_monthly, columns=[name])
-            
-            # 3. ADF 정상성 검정 (논문 3.3.2절 방법론 적용) [cite: 258]
-            clean_series = df[name].dropna()
-            if len(clean_series) > 0:
-                result = adfuller(clean_series)
-                p_value = result[1]
-                
-                print(f"\n[{name}] ADF p-value: {p_value:.4f}")
-                
-                # 4. 정상성 기반 처리 로직
-                if p_value <= 0.05:
-                    print(f"-> {name}: 정상(Stationary). 원계열을 유지합니다.")
-                    master_df[name] = df[name]
-                else:
-                    # FedRate는 비정상이지만 정책적 지속성을 고려해 원계열 유지 [cite: 260, 469]
-                    if name == 'FedRate':
-                        print(f"-> {name}: 비정상이지만 논문 근거에 따라 원계열을 유지합니다.")
-                        master_df[name] = df[name]
-                    else:
-                        # 그 외 변수는 정상성 확보를 위해 1차 차분 수행 [cite: 259, 261]
-                        print(f"-> {name}: 비정상(Non-Stationary). 1차 차분을 수행합니다.")
-                        master_df[f'diff_{name}'] = df[name].diff()
-        
-        # 5. 차분으로 인해 발생한 첫 행의 NaN 제거
-        final_df = master_df.dropna()
-        
-        print("\n" + "="*40)
-        print("✅ 전처리 완료: 분석 준비 데이터셋 확보")
-        print("="*40)
-        
-        return final_df
+        stat_df = pd.DataFrame(stationary_data).dropna()
+        print("✅ 데이터 정상성 확보 완료")
+        return stat_df
 
-# === 실행부 ===
 if __name__ == "__main__":
-    # 이건웅 님의 API Key 적용
-    USER_API_KEY = '5bc51add4d98b30c600855acaee6391c'
+    engine = MacroDataEngine()
+    stat_df = engine.fetch_and_process()
     
-    # 엔진 인스턴스 생성
-    engine = MacroDataEngine(USER_API_KEY)
+    endog = stat_df['PC1']
+    exog = stat_df[['FedRate', 'WTI', 'DXY', 'SCFI']]
     
-    # 데이터 처리 실행
-    processed_data = engine.fetch_and_process()
+    print("\n🚀 SARIMAX 최적 시차(Lag) 탐색 중...")
+    best_aic = np.inf
+    best_lag = 1
+    for lag in range(1, 5):
+        try:
+            m = SARIMAX(endog, exog=exog, order=(lag, 0, 0), trend='c').fit(disp=False)
+            if m.aic < best_aic:
+                best_aic = m.aic
+                best_lag = lag
+        except Exception:
+            pass
+            
+    print(f"✅ 최적 시차(p) 선택 완료: {best_lag}")
     
-    # 결과 출력
-    print(processed_data.tail(10))
+    model = SARIMAX(endog, exog=exog, order=(best_lag, 0, 0), trend='c')
+    results = model.fit(disp=False)
+    
+    gamma_1 = results.params['FedRate']
+    p_val = results.pvalues['FedRate']
+    
+    print("\n" + "="*40)
+    print("🎯 [AI 에이전트 검증 리포트]")
+    print(f"최적 모형: SARIMAX(p={best_lag}, 0, 0) - 상수항 포함")
+    print(f"변수: FedRate -> PC1")
+    print(f"계수(γ): {gamma_1:.4f}")
+    print(f"P-value: {p_val:.4f}")
+    print("="*40)

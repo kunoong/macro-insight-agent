@@ -1,29 +1,22 @@
 import streamlit as st
 from agent import app as langgraph_app
-import PIL.Image as Image
 import os
 
-st.title("📊 Macro Insight AI Agent")
+st.set_page_config(page_title="Macro Insight AI Agent", layout="wide")
+st.title("📊 Macro Insight AI Agent: Cambodia Edition")
 
-if st.button("실시간 분석 및 PDF 생성 시작"):
-    with st.spinner("데이터 분석 및 보고서 작성 중..."):
-        result = langgraph_app.invoke({"messages": ["분석 시작"]})
-        
-        # 화면 출력
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("🤖 AI 분석 리포트")
-            st.markdown(result['analysis_report'])
-        with col2:
-            st.subheader("📈 미래 예측 차트")
-            st.image('macro_trend_final.png', use_container_width=True)
+if st.button("실시간 파이프라인 가동 및 리포트 생성"):
+    with st.spinner("AI 엔진 구동 중 (데이터 전처리 -> 모형 추정 -> 시각화)..."):
+        try:
+            result = langgraph_app.invoke({"messages": ["Start"]})
             
-        # PDF 다운로드 버튼 추가
-        if os.path.exists("Macro_Analysis_Report.pdf"):
-            with open("Macro_Analysis_Report.pdf", "rb") as f:
-                st.download_button(
-                    label="📄 분석 보고서 PDF 다운로드",
-                    data=f,
-                    file_name="Macro_Analysis_Report.pdf",
-                    mime="application/pdf"
-                )
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("🤖 AI 인사이트 리포트")
+                st.markdown(result['analysis_report'])
+            with col2:
+                st.subheader("📈 외생변수 동시적 충격 효과 (γ)")
+                if os.path.exists('macro_trend_final.png'):
+                    st.image('macro_trend_final.png', use_container_width=True)
+        except Exception as e:
+            st.error(f"파이프라인 실행 중 오류가 발생했습니다: {e}")
